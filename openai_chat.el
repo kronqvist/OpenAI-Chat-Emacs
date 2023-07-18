@@ -4,8 +4,8 @@
 (require 'json)
 (require 'org-id)
 
-(defvar openai-chat-api-url "https://api.openai.com/v1/chat/completions"
-  "The URL for the OpenAI API.")
+(defvar openai-chat-api-endpoint "https://api.openai.com/v1/chat/completions"
+  "The endpoint for the OpenAI API.")
 
 (defvar-local openai-chat-model "gpt-3.5-turbo"
   "The default model being used for the chat.")
@@ -31,10 +31,10 @@
 (defvar openai-chat-mode-map
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "C-c RET") 'openai-chat-send)
+    (define-key map (kbd "C-c C-n") 'openai-chat-set-model)
+    (define-key map (kbd "C-c C-e") 'openai-chat-set-api-endpoint)
     map)
   "Keymap for openai-chat-mode.")
-
-(define-key openai-chat-mode-map (kbd "C-c C-n") 'openai-chat-set-model)
 
 (define-derived-mode openai-chat-mode text-mode "ChatGPT"
   "Major mode for talking to OpenAI's chat API."
@@ -42,6 +42,15 @@
   (setq mode-line-format
         (list "%e" mode-line-front-space
               "OpenAI chat API (" 'openai-chat-model ") "
+              mode-line-buffer-identification " "
+              mode-line-position)))
+
+(define-derived-mode openai-chat-mode text-mode "OpenAI chat API"
+  "Major mode for talking to OpenAI's chat API."
+  (add-hook 'after-change-functions 'openai-chat--buffer-change-hook nil t)
+  (setq mode-line-format
+        (list "%e" mode-line-front-space
+              "OpenAI chat API (" 'openai-chat-api-endpoint ", " 'openai-chat-model ") "
               mode-line-buffer-identification " "
               mode-line-position)))
 
@@ -53,6 +62,7 @@
     (with-current-buffer buffer
       (openai-chat-mode)
       (setq openai-chat-model (openai-chat--load-model))
+      (setq openai-chat-api-endpoint (openai-chat--load-api-endpoint))
       (setq openai-chat--buffer (buffer-name buffer))
       (insert "system: You are a helpful assistant\nuser: ")
       (goto-char (point-max)))
@@ -131,7 +141,7 @@
     (message "Sending request")
     (openai-chat--debug "request data: %s" (json-encode data))
     (request
-     openai-chat-api-url
+     openai-chat-api-endpoint
      :type "POST"
      :headers headers
      :data (json-encode data)
@@ -148,7 +158,6 @@
                             (content (cdr (assoc 'content message))))
                        (goto-char (point-max))
                        (insert (format "\n%s: %s\nuser: " role content)))))))
-
      :error (cl-function
              (lambda (&key error-thrown &allow-other-keys&rest _)
                (message "Got error: %S" error-thrown))))))
@@ -171,11 +180,25 @@
           (buffer-string))
       openai-chat-model)))
 
+(defun openai-chat--load-api-endpoint ()
+  "Loads the OpenAI API endpoint from a file or uses the default endpoint if no file exists."
+  (let ((endpoint-file (expand-file-name "~/.openai/endpoint")))
+    (if (file-exists-p endpoint-file)
+        (with-temp-buffer
+          (insert-file-contents endpoint-file)
+          (buffer-string))
+      openai-chat-api-endpoint)))
 
 (defun openai-chat-set-model (model)
   "Set the model for the chat."
   (interactive "sEnter model: ")
   (setq openai-chat-model model)
+  (force-mode-line-update))
+
+(defun openai-chat-set-api-endpoint (endpoint)
+  "Set the API endpoint for the chat."
+  (interactive "sEnter API endpoint: ")
+  (setq openai-chat-api-endpoint endpoint)
   (force-mode-line-update))
 
 (defun openai-chat--remove-trailing-newlines (str)
